@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, send_file
+from flask import Flask, jsonify, send_file
 from flask_socketio import SocketIO
 from reportlab.pdfgen import canvas
 
@@ -15,6 +15,31 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 
+# Dummy Risk Score Function
+def calculate_risk_score(normalized, correlated):
+
+    scored = []
+
+    for ioc in normalized:
+
+        score = 1
+
+        if "malware" in str(ioc).lower():
+            score = 5
+
+        elif "phishing" in str(ioc).lower():
+            score = 4
+
+        elif "suspicious" in str(ioc).lower():
+            score = 3
+
+        ioc["risk_score"] = score
+
+        scored.append(ioc)
+
+    return scored
+
+
 def build_pipeline():
 
     urls = [
@@ -25,20 +50,36 @@ def build_pipeline():
     raw = []
 
     for url in urls:
+
         try:
             raw.extend(fetch_url_feed(url))
+
         except:
             pass
 
     normalized = normalize_iocs(raw, "live_dashboard")
+
     correlated = correlate_iocs(normalized)
 
-    return correlated
+    scored = calculate_risk_score(normalized, correlated)
+
+    return scored
 
 
 @app.route("/")
-def dashboard():
-    return render_template("dashboard.html")
+def home():
+
+    return """
+    <h1>Threat Intelligence Aggregator</h1>
+    <h3>Project Running Successfully</h3>
+
+    <ul>
+        <li><a href='/api/iocs'>View IOC Data</a></li>
+        <li><a href='/api/stats'>View Statistics</a></li>
+        <li><a href='/export/pdf'>Download PDF</a></li>
+        <li><a href='/export/csv'>Download CSV</a></li>
+    </ul>
+    """
 
 
 @app.route("/api/iocs")
@@ -64,23 +105,6 @@ def api_stats():
     })
 
 
-@app.route("/api/timeline")
-def api_timeline():
-
-    data = build_pipeline()
-
-    timeline = []
-
-    for ioc in data:
-        timeline.append({
-            "type": ioc.get("type"),
-            "risk": ioc.get("risk_score", 0),
-            "source": ioc.get("source", "unknown")
-        })
-
-    return jsonify(timeline)
-
-
 @app.route("/export/pdf")
 def export_pdf():
 
@@ -88,55 +112,25 @@ def export_pdf():
 
     os.makedirs("output", exist_ok=True)
 
-    file_path = "output/soc_report.pdf"
+    file_path = "output/report.pdf"
 
     c = canvas.Canvas(file_path)
 
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(150, 800, "SOC THREAT INTELLIGENCE REPORT")
+
+    c.drawString(140, 800, "Threat Intelligence Report")
 
     c.setFont("Helvetica", 10)
-    c.drawString(180, 780, f"Generated: {datetime.datetime.now()}")
 
-    total = len(data)
-    high = len([i for i in data if i.get("risk_score", 0) >= 4])
-    medium = len([i for i in data if i.get("risk_score", 0) == 3])
-    low = len([i for i in data if i.get("risk_score", 0) <= 2])
+    c.drawString(
+        170,
+        780,
+        f"Generated: {datetime.datetime.now()}"
+    )
 
     y = 740
 
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "SUMMARY")
-
-    y -= 20
-    c.setFont("Helvetica", 10)
-
-    c.drawString(50, y, f"Total IOCs: {total}")
-    y -= 15
-
-    c.drawString(50, y, f"High Risk: {high}")
-    y -= 15
-
-    c.drawString(50, y, f"Medium Risk: {medium}")
-    y -= 15
-
-    c.drawString(50, y, f"Low Risk: {low}")
-
-    y -= 30
-
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "TOP HIGH RISK IOCs")
-
-    y -= 20
-    c.setFont("Helvetica", 9)
-
-    sorted_data = sorted(
-        data,
-        key=lambda x: x.get("risk_score", 0),
-        reverse=True
-    )
-
-    for ioc in sorted_data[:25]:
+    for ioc in data[:25]:
 
         text = (
             f"{ioc.get('type')} | "
@@ -144,9 +138,9 @@ def export_pdf():
             f"Risk: {ioc.get('risk_score')}"
         )
 
-        c.drawString(50, y, text)
+        c.drawString(40, y, text)
 
-        y -= 15
+        y -= 20
 
         if y < 50:
             c.showPage()
@@ -166,15 +160,19 @@ def export_csv():
 
     file_path = "output/report.csv"
 
-    with open(file_path, "w", newline="", encoding="utf-8") as file:
+    with open(
+        file_path,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as file:
 
         writer = csv.writer(file)
 
         writer.writerow([
             "Type",
             "Value",
-            "Risk Score",
-            "Source"
+            "Risk Score"
         ])
 
         for ioc in data:
@@ -182,8 +180,7 @@ def export_csv():
             writer.writerow([
                 ioc.get("type"),
                 ioc.get("value"),
-                ioc.get("risk_score"),
-                ioc.get("source")
+                ioc.get("risk_score")
             ])
 
     return send_file(file_path, as_attachment=True)
@@ -191,9 +188,16 @@ def export_csv():
 
 @app.route("/logout")
 def logout():
+
     return "<h2>Logged Out Successfully</h2>"
 
 
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port)
+
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )
