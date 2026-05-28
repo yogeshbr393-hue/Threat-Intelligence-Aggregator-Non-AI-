@@ -5,41 +5,100 @@ from reportlab.pdfgen import canvas
 import datetime
 import csv
 import os
-
-from parser import fetch_url_feed
-from normalizer import normalize_iocs
-from correlator import correlate_iocs
+import requests
 
 app = Flask(__name__)
 
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 
-# Dummy Risk Score Function
-def calculate_risk_score(normalized, correlated):
+# -----------------------------
+# IOC FETCH FUNCTION
+# -----------------------------
+def fetch_url_feed(url):
 
-    scored = []
+    results = []
 
-    for ioc in normalized:
+    try:
 
-        score = 1
+        response = requests.get(url, timeout=10)
 
-        if "malware" in str(ioc).lower():
-            score = 5
+        lines = response.text.splitlines()
 
-        elif "phishing" in str(ioc).lower():
-            score = 4
+        for line in lines:
 
-        elif "suspicious" in str(ioc).lower():
-            score = 3
+            line = line.strip()
 
-        ioc["risk_score"] = score
+            if line and not line.startswith("#"):
 
-        scored.append(ioc)
+                results.append({
+                    "type": "ioc",
+                    "value": line,
+                    "source": url
+                })
 
-    return scored
+    except Exception as e:
+
+        print("ERROR:", e)
+
+    return results
 
 
+# -----------------------------
+# NORMALIZER
+# -----------------------------
+def normalize_iocs(raw_data, source_name):
+
+    normalized = []
+
+    for item in raw_data:
+
+        try:
+
+            normalized.append({
+                "type": item.get("type", "ioc"),
+                "value": item.get("value", ""),
+                "source": source_name,
+                "risk_score": 3
+            })
+
+        except:
+            pass
+
+    return normalized
+
+
+# -----------------------------
+# CORRELATOR
+# -----------------------------
+def correlate_iocs(data):
+
+    correlated = []
+
+    for item in data:
+
+        value = item.get("value", "").lower()
+
+        if "malware" in value:
+            item["risk_score"] = 5
+
+        elif "phishing" in value:
+            item["risk_score"] = 4
+
+        elif "trojan" in value:
+            item["risk_score"] = 5
+
+        else:
+            item["risk_score"] = 2
+
+        correlated.append(item)
+
+    return correlated
+
+
+# -----------------------------
+# PIPELINE
+# -----------------------------
 def build_pipeline():
 
     urls = [
@@ -51,60 +110,72 @@ def build_pipeline():
 
     for url in urls:
 
-        try:
-            raw.extend(fetch_url_feed(url))
+        raw.extend(fetch_url_feed(url))
 
-        except:
-            pass
-
-    normalized = normalize_iocs(raw, "live_dashboard")
+    normalized = normalize_iocs(raw, "threat_feed")
 
     correlated = correlate_iocs(normalized)
 
-    scored = calculate_risk_score(normalized, correlated)
-
-    return scored
+    return correlated
 
 
+# -----------------------------
+# HOME PAGE
+# -----------------------------
 @app.route("/")
 def home():
 
     return """
     <h1>Threat Intelligence Aggregator</h1>
-    <h3>Project Running Successfully</h3>
+
+    <h3>Project Running Successfully ✅</h3>
 
     <ul>
         <li><a href='/api/iocs'>View IOC Data</a></li>
         <li><a href='/api/stats'>View Statistics</a></li>
-        <li><a href='/export/pdf'>Download PDF</a></li>
-        <li><a href='/export/csv'>Download CSV</a></li>
+        <li><a href='/export/pdf'>Download PDF Report</a></li>
+        <li><a href='/export/csv'>Download CSV Report</a></li>
     </ul>
     """
 
 
+# -----------------------------
+# IOC API
+# -----------------------------
 @app.route("/api/iocs")
 def api_iocs():
 
     data = build_pipeline()
 
-    socketio.emit("ioc_update", data)
-
     return jsonify(data)
 
 
+# -----------------------------
+# STATS API
+# -----------------------------
 @app.route("/api/stats")
 def api_stats():
 
     data = build_pipeline()
 
     return jsonify({
+
         "total": len(data),
-        "high": len([i for i in data if i.get("risk_score", 0) >= 4]),
-        "medium": len([i for i in data if i.get("risk_score", 0) == 3]),
-        "low": len([i for i in data if i.get("risk_score", 0) <= 2]),
+
+        "high":
+        len([i for i in data if i.get("risk_score", 0) >= 4]),
+
+        "medium":
+        len([i for i in data if i.get("risk_score", 0) == 3]),
+
+        "low":
+        len([i for i in data if i.get("risk_score", 0) <= 2]),
     })
 
 
+# -----------------------------
+# EXPORT PDF
+# -----------------------------
 @app.route("/export/pdf")
 def export_pdf():
 
@@ -123,7 +194,7 @@ def export_pdf():
     c.setFont("Helvetica", 10)
 
     c.drawString(
-        170,
+        160,
         780,
         f"Generated: {datetime.datetime.now()}"
     )
@@ -133,7 +204,6 @@ def export_pdf():
     for ioc in data[:25]:
 
         text = (
-            f"{ioc.get('type')} | "
             f"{ioc.get('value')} | "
             f"Risk: {ioc.get('risk_score')}"
         )
@@ -143,7 +213,9 @@ def export_pdf():
         y -= 20
 
         if y < 50:
+
             c.showPage()
+
             y = 800
 
     c.save()
@@ -151,6 +223,9 @@ def export_pdf():
     return send_file(file_path, as_attachment=True)
 
 
+# -----------------------------
+# EXPORT CSV
+# -----------------------------
 @app.route("/export/csv")
 def export_csv():
 
@@ -172,7 +247,8 @@ def export_csv():
         writer.writerow([
             "Type",
             "Value",
-            "Risk Score"
+            "Risk Score",
+            "Source"
         ])
 
         for ioc in data:
@@ -180,24 +256,21 @@ def export_csv():
             writer.writerow([
                 ioc.get("type"),
                 ioc.get("value"),
-                ioc.get("risk_score")
+                ioc.get("risk_score"),
+                ioc.get("source")
             ])
 
     return send_file(file_path, as_attachment=True)
 
 
-@app.route("/logout")
-def logout():
-
-    return "<h2>Logged Out Successfully</h2>"
-
-
+# -----------------------------
+# MAIN
+# -----------------------------
 if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
 
-    socketio.run(
-        app,
+    app.run(
         host="0.0.0.0",
         port=port
     )
