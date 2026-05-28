@@ -1,5 +1,6 @@
 streamlit
 flask
+flask-socketio
 pandas
 requests
 flask-cors
