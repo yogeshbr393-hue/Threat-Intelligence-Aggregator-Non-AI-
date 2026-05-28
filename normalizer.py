@@ -1,51 +1,26 @@
-from modules.validator import (
-    is_valid_ip,
-    is_valid_domain,
-    is_valid_url,
-    is_valid_hash
-)
-
-# -------------------------
-# DETECT IOC TYPE
-# -------------------------
-def detect_type(value):
-
-    value = value.strip()
-
-    if is_valid_ip(value):
-        return "ip"
-
-    if is_valid_url(value):
-        return "url"
-
-    if is_valid_domain(value):
-        return "domain"
-
-    if is_valid_hash(value):
-        return "hash"
-
-    return "unknown"
+from validator import is_valid_ioc
 
 
-# -------------------------
-# NORMALIZE IOCS
-# -------------------------
-def normalize_iocs(iocs, source_name):
+def normalize_iocs(raw_data, source_name):
 
     normalized = []
 
-    for item in iocs:
+    for item in raw_data:
 
-        value = item.get("value", "").strip()
-        ioc_type = item.get("type", "unknown")
+        try:
 
-        if ioc_type == "unknown":
-            ioc_type = detect_type(value)
+            value = item.get("value", "").strip()
 
-        normalized.append({
-            "type": ioc_type,
-            "value": value.lower(),
-            "source": source_name
-        })
+            if not is_valid_ioc(value):
+                continue
+
+            normalized.append({
+                "type": item.get("type", "ioc"),
+                "value": value,
+                "source": source_name
+            })
+
+        except:
+            pass
 
     return normalized
