@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, jsonify, send_file
 from flask_socketio import SocketIO
 from reportlab.pdfgen import canvas
@@ -7,10 +6,9 @@ import datetime
 import csv
 import os
 
-from modules.parser import fetch_url_feed
-from modules.normalizer import normalize_iocs
-from modules.correlator import correlate_iocs
-from modules.risk_engine import calculate_risk_score
+from parser import fetch_url_feed
+from normalizer import normalize_iocs
+from correlator import correlate_iocs
 
 app = Flask(__name__)
 
@@ -34,9 +32,8 @@ def build_pipeline():
 
     normalized = normalize_iocs(raw, "live_dashboard")
     correlated = correlate_iocs(normalized)
-    scored = calculate_risk_score(normalized, correlated)
 
-    return scored
+    return correlated
 
 
 @app.route("/")
@@ -200,4 +197,3 @@ def logout():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     socketio.run(app, host="0.0.0.0", port=port)
-
