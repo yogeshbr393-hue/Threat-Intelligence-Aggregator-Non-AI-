@@ -1,12 +1,5 @@
-<<<<<<< HEAD
+streamlit
 flask
-flask-socketio
+pandas
 requests
-reportlab
-=======
-flask
-flask-socketio
-requests
-reportlab
-eventlet
->>>>>>> 640554fdbb669b4e2a4e2c2886866c52611b1c13
+flask-cors
