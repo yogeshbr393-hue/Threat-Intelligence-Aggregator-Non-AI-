@@ -1,6 +1,5 @@
-streamlit
 flask
 flask-socketio
-pandas
 requests
-flask-cors
+reportlab
+eventlet
